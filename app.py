@@ -1,10 +1,9 @@
 import streamlit as st
 import google.generativeai as genai
 from datetime import datetime
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaIoBaseUpload
 import io
 import json
 
@@ -28,7 +27,7 @@ st.markdown("""
 st.title("🚀 Jouw Persoonlijke Ontwikkelplan Coach")
 st.markdown("*Laten we samen werken aan jouw groei en ontwikkeling*")
 
-# 2. API Key validatie
+# 3. API Key validatie
 if "GEMINI_API_KEY" not in st.secrets:
     st.error("⚠️ Geen API Key gevonden. Stel deze in bij de Streamlit Secrets.")
     st.stop()
@@ -36,15 +35,15 @@ if "GEMINI_API_KEY" not in st.secrets:
 api_key = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=api_key)
 
-# Google Drive OAuth configuratie
+# Google Drive Service Account configuratie
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-# Controleer of Google OAuth credentials aanwezig zijn
-if "GOOGLE_CLIENT_ID" not in st.secrets or "GOOGLE_CLIENT_SECRET" not in st.secrets:
-    st.warning("⚠️ Google Drive credentials ontbreken. Download functionaliteit is wel beschikbaar.")
-    GOOGLE_DRIVE_ENABLED = False
-else:
+# Controleer of Google Service Account credentials aanwezig zijn
+if "google_auth" in st.secrets and "json_content" in st.secrets["google_auth"]:
     GOOGLE_DRIVE_ENABLED = True
+else:
+    GOOGLE_DRIVE_ENABLED = False
+    st.sidebar.warning("⚠️ Google Drive niet geconfigureerd. Download functie is beschikbaar.")
 
 # 4. Verbeterde System Instruction
 SYSTEM_INSTRUCTION = """
@@ -83,31 +82,37 @@ if "model" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    # Optionele welkomstboodschap
+    # Welkomstboodschap
     welkom = "Hallo! Ik ben je persoonlijke ontwikkelplan coach. Laten we beginnen met jouw ambities. Vertel eens: waar zie je jezelf over een jaar?"
     st.session_state.messages.append({"role": "assistant", "content": welkom})
 
 if "plan_klaar" not in st.session_state:
     st.session_state.plan_klaar = False
 
-if "google_creds" not in st.session_state:
-    st.session_state.google_creds = None
-
-# 3. Helper functie voor Google Drive upload
+# 6. Helper functie voor Google Drive upload met Service Account
 def upload_to_google_drive(file_content, filename):
-    """Upload een bestand naar Google Drive"""
+    """Upload een bestand naar Google Drive met Service Account"""
     try:
-        # Bouw de Drive service
-        service = build('drive', 'v3', credentials=st.session_state.google_creds)
+        # Parse de service account credentials
+        service_account_info = json.loads(st.secrets["google_auth"]["json_content"])
         
-        # Maak een file metadata
+        # Maak credentials aan
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info,
+            scopes=SCOPES
+        )
+        
+        # Bouw de Drive service
+        service = build('drive', 'v3', credentials=credentials)
+        
+        # Maak file metadata
         file_metadata = {
             'name': filename,
-            'mimeType': 'application/vnd.google-apps.document'
+            'mimeType': 'text/plain'
         }
         
         # Upload het bestand
-        media = MediaFileUpload(
+        media = MediaIoBaseUpload(
             io.BytesIO(file_content.encode('utf-8')),
             mimetype='text/plain',
             resumable=True
@@ -119,35 +124,12 @@ def upload_to_google_drive(file_content, filename):
             fields='id, webViewLink'
         ).execute()
         
-        return file.get('webViewLink')
+        return file.get('webViewLink'), file.get('id')
     except Exception as e:
         st.error(f"Upload mislukt: {str(e)}")
-        return None
+        return None, None
 
-def get_google_auth_url():
-    """Genereer de OAuth URL voor Google authenticatie"""
-    redirect_uri = st.secrets.get("REDIRECT_URI", "http://localhost:8501")
-    
-    client_config = {
-        "web": {
-            "client_id": st.secrets["GOOGLE_CLIENT_ID"],
-            "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [redirect_uri]
-        }
-    }
-    
-    flow = Flow.from_client_config(
-        client_config,
-        scopes=SCOPES,
-        redirect_uri=redirect_uri
-    )
-    
-    auth_url, _ = flow.authorization_url(prompt='consent')
-    return auth_url, flow
-
-# 6. Sidebar met info en opties
+# 7. Sidebar met info en opties
 with st.sidebar:
     st.header("ℹ️ Over deze Coach")
     st.write("""
@@ -168,13 +150,19 @@ with st.sidebar:
     
     # Toon voortgang
     st.metric("Uitgewisselde berichten", len(st.session_state.messages))
+    
+    # Status Google Drive
+    if GOOGLE_DRIVE_ENABLED:
+        st.success("✅ Google Drive: Actief")
+    else:
+        st.info("💾 Google Drive: Niet geconfigureerd")
 
-# 7. Toon chat geschiedenis
+# 8. Toon chat geschiedenis
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 8. Chat input en verwerking
+# 9. Chat input en verwerking
 if not st.session_state.plan_klaar:
     if prompt := st.chat_input("Typ hier je antwoord..."):
         # Voeg gebruikersbericht toe
@@ -188,7 +176,7 @@ if not st.session_state.plan_klaar:
                 with st.spinner("Aan het denken..."):
                     # Bouw chat history op in correct formaat
                     chat_history = []
-                    for msg in st.session_state.messages[:-1]:  # Exclude laatste user message
+                    for msg in st.session_state.messages[:-1]:
                         role = "user" if msg["role"] == "user" else "model"
                         chat_history.append({"role": role, "parts": [msg["content"]]})
                     
@@ -211,7 +199,7 @@ if not st.session_state.plan_klaar:
             st.error(f"❌ Er ging iets mis: {str(e)}")
             st.info("Probeer het opnieuw of herstart het gesprek via de sidebar.")
 
-# 9. Plan opslaan functionaliteit
+# 10. Plan opslaan functionaliteit
 if st.session_state.plan_klaar:
     st.success("✅ Je ontwikkelplan is compleet!")
     
@@ -238,65 +226,23 @@ if st.session_state.plan_klaar:
     
     with col2:
         if GOOGLE_DRIVE_ENABLED:
-            # Check of gebruiker al is ingelogd
-            if st.session_state.google_creds is None:
-                # Controleer voor OAuth callback
-                query_params = st.query_params
+            if st.button("💾 Opslaan in Google Drive", use_container_width=True):
+                filename = f"Ontwikkelplan_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
                 
-                if "code" in query_params:
-                    # Gebruiker komt terug van Google authenticatie
-                    try:
-                        redirect_uri = st.secrets.get("REDIRECT_URI", "http://localhost:8501")
-                        client_config = {
-                            "web": {
-                                "client_id": st.secrets["GOOGLE_CLIENT_ID"],
-                                "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
-                                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                                "token_uri": "https://oauth2.googleapis.com/token",
-                                "redirect_uris": [redirect_uri]
-                            }
-                        }
-                        
-                        flow = Flow.from_client_config(
-                            client_config,
-                            scopes=SCOPES,
-                            redirect_uri=redirect_uri
-                        )
-                        
-                        flow.fetch_token(code=query_params["code"])
-                        st.session_state.google_creds = flow.credentials
-                        
-                        # Verwijder query params
-                        st.query_params.clear()
-                        st.success("✅ Succesvol ingelogd bij Google!")
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Authenticatie mislukt: {str(e)}")
-                else:
-                    # Toon login knop
-                    if st.button("🔐 Login met Google", use_container_width=True):
-                        auth_url, _ = get_google_auth_url()
-                        st.markdown(f"[Klik hier om in te loggen bij Google]({auth_url})")
-                        st.info("Na het inloggen word je teruggeleid naar deze pagina.")
-            else:
-                # Gebruiker is ingelogd, toon upload knop
-                if st.button("💾 Opslaan in Google Drive", use_container_width=True):
-                    filename = f"Ontwikkelplan_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                with st.spinner("Uploaden naar Google Drive..."):
+                    link, file_id = upload_to_google_drive(plan_text, filename)
                     
-                    with st.spinner("Uploaden naar Google Drive..."):
-                        link = upload_to_google_drive(plan_text, filename)
-                        
-                        if link:
-                            st.success("✅ Succesvol opgeslagen!")
-                            st.markdown(f"[📄 Open in Google Drive]({link})")
+                    if link:
+                        st.success("✅ Succesvol opgeslagen!")
+                        st.markdown(f"[📄 Open in Google Drive]({link})")
+                        st.caption(f"Bestand ID: {file_id}")
         else:
             st.button(
                 "💾 Google Drive (niet geconfigureerd)", 
                 disabled=True,
                 use_container_width=True
             )
-            st.caption("Configureer Google OAuth om deze functie te gebruiken")
+            st.caption("Configureer Service Account om deze functie te gebruiken")
     
     st.divider()
     
