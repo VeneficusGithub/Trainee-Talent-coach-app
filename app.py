@@ -23,7 +23,7 @@ eindig je je bericht met exact deze tekst op een nieuwe regel: [PLAN_IS_KLAAR]
 """
 
 model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro", # Of 2.5-pro als die beschikbaar is
+    model_name="gemini-2.5-pro", 
     system_instruction=SYSTEM_INSTRUCTION
 )
 
