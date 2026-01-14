@@ -45,7 +45,7 @@ else:
     GOOGLE_DRIVE_ENABLED = False
     st.sidebar.warning("⚠️ Google Drive niet geconfigureerd. Download functie is beschikbaar.")
 
-# 4. Verbeterde System Instruction
+# 4. System Instruction
 SYSTEM_INSTRUCTION = """
 Jij bent een ervaren talent coach met jarenlange ervaring in persoonlijke ontwikkeling.
 
@@ -70,10 +70,10 @@ op een nieuwe regel: [PLAN_IS_KLAAR]
 # 5. Initialisatie van model en sessie
 if "model" not in st.session_state:
     st.session_state.model = genai.GenerativeModel(
-        model_name="gemini-1.5-pro",
+        model_name="gemini-2.5-pro",
         system_instruction=SYSTEM_INSTRUCTION,
         generation_config={
-            "temperature": 0.7,
+            "temperature": 0.5,
             "top_p": 0.95,
             "top_k": 40,
             "max_output_tokens": 2048,
