@@ -25,7 +25,7 @@ pip install -r requirements.txt
 
 ### 3. Configureer API keys
 
-Maak een `.streamlit/secrets.toml` bestand aan:
+Maak een `secrets.toml` bestand aan:
 
 ```toml
 GEMINI_API_KEY = "jouw_gemini_api_key"
